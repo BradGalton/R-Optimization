@@ -1,0 +1,53 @@
+##########################################################################
+# Risk Parity Portfolio Optimization - a robust numerical approach
+# Implementation of Newton algorithm in an eigenvector-eigenvalue framework
+##########################################################################
+# The F and Jinv functions below are needed for the Newton algorithm
+# N-dimensional portfolio weights vector plus the unknown lamda scalar
+
+# F function
+F = function(y,V){
+n = length(y)
+wts = as.matrix(y[-n])
+lambda = y[n]
+rbind(V%*%wts-lambda/wts,sum(wts)-1)
+}
+
+# Jinv function
+Jinv = function(y,V){
+n = length(y)
+wts = as.matrix(y[-n])
+lambda = y[n]
+J = rbind(cbind(V+lambda*diag(as.numeric(1/wts^2)),-1/wts),c(rep(1,p),0))
+solve(J)
+}
+
+# J function - not needed for Newton algorithm but can use to check Jinv
+J = function(y,V){
+n = length(y)
+wts = as.matrix(y[-n])
+lambda = y[n]
+rbind(cbind(V+lambda*diag(as.numeric(1/wts^2)),-1/wts),c(rep(1,p),0))
+}
+
+# Set initial weights and compute covariance matrix
+p = ncol(ret)
+wts.init = matrix(rep(1/p,p))
+V = var(ret)
+port.var = t(wts.init)%*%V%*%wts.init
+lambda.init = as.numeric(port.var/p)
+y.init = rbind(wts.init,lambda.init)
+
+# Compute MCTR
+port.sigma = sqrt(as.numeric(port.var))
+mctr = V%*%wts/port.sigma
+round(t(mctr),3)
+barplot(mctr[,1],names = tickers,ylab = "MCTR",col = "blue")
+title(main = "MARGINAL CONTRIBUTION TO RISK")
+
+# Compute PCTR
+pctr = 100*wts*mctr/port.sigma
+round(t(pctr),3)
+sum(pctr)
+barplot(pctr[,1],names = tickers,ylab = "PERCENT",col = "blue")
+title(main = "PERCENTAGE CONTRIBUTION TO RISK")
