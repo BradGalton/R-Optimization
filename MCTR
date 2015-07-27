@@ -1,0 +1,44 @@
+library(xts)
+load("filename")                                      #Select local directory
+tickers = c("GENZ","HON","LLTC","MSFT","ORCL")        #Example dataframe headers
+plot.zoo(largecap.ts[,tickers])
+returns = coredata(largecap.ts[, tickers])
+V = var(returns)
+n = ncol(returns)
+# Weights view
+eq.wts = FALSE
+if(eq.wts) {wts = matrix(1/n, ncol = 1, nrow = n)} else
+    {wts = matrix(c(.40,.05,.25,.20,.10), nrow = n)}  #Example intitial weights
+#Risk parity weights
+#wts = matrix(c(.231,.267,.172,.180,.149))            #Rebalanced weights
+#wts = wts/sum(wts)
+mu.assets = apply(returns, 2, mean)
+mu.port = as.numeric(t(wts)%*%as.matrix(mu.assets,ncol=1))
+var.port = as.numeric(t(wts) %*% V %*% wts)
+sigma.port = sqrt(var.port)
+sigma.port
+betas = V %*% wts/var.port
+mctr = 100*betas*sigma.port
+pctr = 100*wts*betas
+round(t(betas),3)
+round(t(mctr),3)
+round(t(pctr),3)
+sum(pctr)
+barplot(pctr[,1],names = tickers,ylab = "PERCENT", col = "blue")
+title(main = "PERCENTAGE CONTRIBUTION TO RISK")
+mu.imp = 100*betas*mu.port
+mu.assets = 100*mu.assets
+xlim = range(0,1.2*mctr)
+ylim = range(0,mu.imp, mu.assets)
+plot(mctr, mu.imp, xlab = "MARGINAL CONTRIBUTION TO RISK (%)",
+  ylab = "IMPLIED RETURNS (%)", xlim = xlim, ylim = ylim, pch = 16, cex = 1.1)
+lines(c(0,mctr), c(0,mu.imp), lty = 2,lwd = 1.2)
+points(mctr, mu.assets, pch = 0, cex = 1.1)
+nudge = .02*(xlim[2] - xlim[1])
+text(mctr + nudge, mu.assets, tickers,adj = 0)
+if(eq.wts) {title(main = "IMPLIED RETURNS VS MCTR: EQUAL WEIGHTS")} else
+      {title(main = "IMPLIED RETURNS VS MCTR: REBALANCED")}
+leg.names = c("IMPLIED RETURNS", "FORECAST RETURNS")
+x = xlim[1] + .03*(xlim[2] - xlim[1])
+y = ylim[2] - .03*(ylim[2] - ylim[1])
+legend("topleft", y =NULL, legend = leg.names, bty = "n",pch = c(16, 0),cex = 1.1)
