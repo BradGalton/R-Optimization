@@ -1,0 +1,309 @@
+rm(list=ls())
+
+#####################################################################
+# Retirement Fund Optimization
+#####################################################################
+library(MASS)
+
+#####################################################################
+# Essential functions
+#####################################################################
+
+# Salary function
+Salary <- function(Age) {
+  60+(Age-27)*1
+}
+
+# Contribution function
+Contributions <- function(Age) {
+  n <- 67-Age
+  Cont <- 0
+  a <- 0
+  for(i in 1:n) {
+    Cont[i] <- Salary(Age+a)*.16
+    a <- a+1
+  }
+  return(Cont)
+}
+
+# Utility function parameters
+gamma1 <- .02
+gamma2 <- .04
+spending <- (.8-.3)*Salary(67)
+target <- spending/.04
+
+# Quadratic shortfall utility function
+Utility1 <- function(x,target,gamma1) {
+  if(x >= 1.2*target) {
+    U <- x
+  }
+  else if(x >= 0.8*target & x < 1.2*target) {
+    U <- x-gamma1*(1.2*target-x)^2
+  }
+  else if(x <= 0) {
+    U <- -5000
+  }
+  else {
+    U <- x-gamma1*(1.2-0.8)^2*target^2
+  }
+  return(U)
+}
+
+Utility2 <- function(x,target,gamma1,gamma2) {
+  if(x >= 1.2*target) {
+    U <- x
+  }
+  else if(x >= 0.8*target & x < 1.2*target) {
+    U <- x-gamma1*(1.2*target-x)^2
+  }
+  else {
+    U <- x-gamma2*(1.2*target-x)^2
+  }
+  return(U)    
+}
+
+# Constant ROR function
+ROR <- function(y,age,B,C) {
+  n <- 67-age
+  a <- 0
+  for(i in 1:n) {
+    a[i] <- C[i]*(1+y)^(n-i+1)
+  }
+  abs(-1*target+B*(1+y)^n+sum(a))
+}
+
+# Optimize ROR
+R <- optimize(function(y) ROR(y,Age,Bal,Cont),lower=0,upper=1)$minimum
+
+##########################################################################
+# Asset statistics 
+##########################################################################
+
+AssetNames <- c("US Equity", "Int'l Equity", "Emer Mkt Equity", "Global RE", "Agg Fixed", "Hedge Fund","Cash")
+
+ret_vec <- c(0.06, 0.059, 0.07, 0.056, 0.019, 0.052, 0.015)
+stdev_vec <- c(0.191, 0.202, 0.268, 0.207, 0.038, 0.07, 0.058)
+correl_mat <- rbind(c(1.00, 0.74, 0.67, 0.74, 0.13, 0.47, 0.02),
+                    c(0.74, 1.00, 0.70, 0.78, 0.09, 0.46, 0.00),
+                    c(0.67, 0.70, 1.00, 0.66, 0.07, 0.45, -0.03),
+                    c(0.74, 0.78, 0.66, 1.00, 0.10, 0.37, -0.03),
+                    c(0.13, 0.09, 0.07, 0.10, 1.00, 0.10, 0.10),
+                    c(0.47, 0.46, 0.45, 0.37, 0.10, 1.00, 0.55),
+                    c(0.02, 0.00, -0.03, -0.03, 0.10, 0.55, 1.00))
+
+cov_mat <- diag(stdev_vec) %*% correl_mat %*% diag(stdev_vec)
+
+########################################################################
+# Asset return scenarios with mean and dispersion correction methods
+########################################################################
+
+TreeStructure <- c(100,1,1,1,1,1,1,1,1,1,1,1,1,1,1)
+TimeHorizonStructure <- c(1,1,1,1,1,1,1,1,1,1,1,1,1,1,1)
+
+FirstNodeAtStage = array(1,dim=c(length(TreeStructure)+1))
+LastNodeAtStage = array(1,dim=c(length(TreeStructure)+1))
+NodesAtStage = array(1,dim=c(length(TreeStructure)+1))
+TotalNodes = 1
+
+for(i in 2:(length(TreeStructure)+1))                 
+{
+  FirstNodeAtStage[i] = LastNodeAtStage[i-1] + 1
+  NodesAtStage[i] = NodesAtStage[i-1] * TreeStructure[i-1]
+  LastNodeAtStage[i] = FirstNodeAtStage[i] + NodesAtStage[i] - 1
+  TotalNodes = TotalNodes + NodesAtStage[i]
+}
+
+ParentNode = array(0,dim=c(length(TotalNodes)))
+FirstChild = array(2,dim=c(length(TotalNodes)))
+LastChild = array(TreeStructure[1]+1,dim=c(length(TotalNodes)))
+NodeStage = array(1,dim=c(length(TotalNodes)))
+
+for(i in 1:LastNodeAtStage[length(TreeStructure)])
+{
+  for(j in FirstChild[i]:LastChild[i])
+  {
+    ParentNode[j] = i
+    NodeStage[j] = NodeStage[ParentNode[j]] + 1
+    if(NodeStage[j] <= length(TreeStructure))
+    {
+      FirstChild[j] = LastChild[j-1]+1
+      LastChild[j] = FirstChild[j] + TreeStructure[NodeStage[j]] - 1
+    }
+  }
+}
+
+AssetReturns = array(0,dim=c(TotalNodes,length(AssetNames)))
+
+for(nperiod in 1:length(TreeStructure))
+{  
+  period_cc_stdev_vec = sqrt(log(1 + stdev_vec^2 / (1 + ret_vec)^2))
+  period_cc_ret_vec = log(1+ret_vec) - period_cc_stdev_vec^2/2
+  
+  period_cc_stdev_vec = period_cc_stdev_vec * sqrt(TimeHorizonStructure[nperiod])
+  period_cc_ret_vec = period_cc_ret_vec * TimeHorizonStructure[nperiod]
+  
+  period_cc_cov_mat = diag(period_cc_stdev_vec) %*% correl_mat %*% diag(period_cc_stdev_vec)
+  
+  AssetReturns[FirstNodeAtStage[nperiod+1]:LastNodeAtStage[nperiod+1],1:length(AssetNames)] = 
+    mvrnorm(LastNodeAtStage[nperiod+1] - FirstNodeAtStage[nperiod+1] + 1, period_cc_ret_vec,period_cc_cov_mat)
+  
+  AssetReturns[FirstNodeAtStage[nperiod+1]:LastNodeAtStage[nperiod+1],1:length(AssetNames)] = 
+    exp(AssetReturns[FirstNodeAtStage[nperiod+1]:LastNodeAtStage[nperiod+1],1:length(AssetNames)]) - 1
+
+  # Dispersion scenario adjustment
+  # Factor sample and distribution matrices
+  Ls <- t(chol(cov_mat))
+  Ld <- t(chol(period_cc_cov_mat))
+  Cov_Adj <- diag(Ld*Ls^-1)
+
+  #Dispersion correction
+  for(i in 1:length(Cov_Adj)) {
+   AssetReturns[FirstNodeAtStage[nperiod+1]:LastNodeAtStage[nperiod+1],i] = 
+    AssetReturns[FirstNodeAtStage[nperiod+1]:LastNodeAtStage[nperiod+1],i]*Cov_Adj[i]    
+  }
+  
+  # Mean return scenario adjustment
+  # Vector of differences between distribution and sample
+  Mean_Adj <- period_cc_ret_vec-colMeans(AssetReturns[FirstNodeAtStage[nperiod+1]:LastNodeAtStage[nperiod+1],])
+  
+  # Mean correction
+  for(i in 1:length(Mean_Adj)) {
+    AssetReturns[FirstNodeAtStage[nperiod+1]:LastNodeAtStage[nperiod+1],i] = 
+    AssetReturns[FirstNodeAtStage[nperiod+1]:LastNodeAtStage[nperiod+1],i]+ Mean_Adj[i]  
+  }  
+}  
+
+#########################################################################
+# Fund mixtures and returns
+#########################################################################
+
+# Fund weights
+Fund_Wts <- cbind(c(.3,.3,.1,.1,.1,.1,0),
+                  c(.25,.25,.1,.1,.2,.1,0),
+                  c(.25,.21,.08,.08,.3,.08,0),
+                  c(.23,.19,.06,.06,.4,.06,0),
+                  c(.21,.15,.04,.05,.45,.05,.05),
+                  c(.16,.12,.04,.04,.5,.04,.1),
+                  c(.13,.09,.02,.03,.55,.03,.15),
+                  c(.08,.06,.01,.02,.51,.02,.3))
+
+# Generate fund returns at each node
+FundReturns <- matrix(0,TotalNodes,ncol(Fund_Wts))
+for(i in 1:TotalNodes) {
+  for(j in 1:ncol(Fund_Wts)) {
+    FundReturns[i,j] <- AssetReturns[i,] %*% Fund_Wts[,j] 
+  }
+}
+
+######################################################################################
+# Decision optimization
+# Functions for tables of maximum expected utility values and optimal mixture decisions 
+######################################################################################
+
+# Function calculates tables of expected utility values and optimal fund decisions
+Optimal_Mix <- function(Wealth,Age,Cont,Bal,FundReturns) {
+
+  # Initialize value and decision matrices
+  # Row ordering by wealth (decreasing)
+  # Column ordering by age (increasing)
+  V_mat <- matrix(0,length(Wealth),67-Age+1)
+  rownames(V_mat) <- Wealth
+  colnames(V_mat) <- seq(Age,67)
+  D_mat <- V_mat[,-ncol(V_mat)]
+
+  # End stage utility values
+  for(i in 1:length(Wealth)) {
+    V_mat[i,ncol(V_mat)] <- Utility2(Wealth[i],target,gamma1,gamma2)
+  }
+
+  # Backward recursion sequence
+  j.index <- seq(ncol(V_mat)-1,1,-1)
+  for(j in j.index) {
+    for(i in 1:length(Wealth)) {
+      w <- Wealth[i]+Cont[1]
+      # Matrix of wealth scenarios at each wealth level
+      U <- w*(1+FundReturns[FirstNodeAtStage[2]:LastNodeAtStage[2],1:ncol(FundReturns)])
+      for(n in 1:ncol(U)) {
+        for(m in 1:nrow(U)) {
+          # Upper bound rule
+          if (U[m,n] >= Wealth[1]) {
+            U[m,n] <- U[m,n]
+          }
+          # Lower bound rule
+          else if(U[m,n] <= 0) {
+            U[m,n] <- -90000
+          }
+          # Linear interpolation of intermediate values
+          else {
+              w.index <- which.max(Wealth < U[m,n])
+              w1 <- Wealth[w.index]
+              v1 <- V_mat[w.index,2]
+              U[m,n] <- v1+abs(((U[m,n]-w1)/(-diff(Wealth)[1]))*(V_mat[w.index-1,2]-v1))
+            }
+          }
+        }
+        V <- colMeans(U)
+        V_mat[i,1] <- max(V)
+        D_mat[i,1] <- which.max(V)      
+      }
+    
+  }
+
+# Function for client optimization for given utility value matrix
+Client_Opt <- function(Wealth,Age,Cont,Bal,V_mat) {
+  a <- 67-Age-1
+  w <- Bal+Cont[1]
+  U <- w*(1+FundReturns[FirstNodeAtStage[ncol(V_mat)-a]:LastNodeAtStage[ncol(V_mat)-a],1:ncol(FundReturns)])
+  for(n in 1:ncol(U)) {
+    for(m in 1:nrow(U)) {
+      w.index <- which.max(Wealth < U[m,n])
+      w1 <- Wealth[w.index]
+      v1 <- V_mat[w.index,2]
+      U[m,n] <- v1+abs(((U[m,n]-w1)/(-diff(Wealth)[1]))*(V_mat[w.index-1,2]-v1))
+      }        
+    }   
+    V <- colMeans(U)
+    V_opt <- max(V)
+    D_opt <- which.max(V)
+    return(V_opt)
+}
+
+# Upper wealth boundry
+# Bound should high enough to effectively incorporate upper sample values into valuation
+# Skew will become a factor with longer horizons
+Wealth_ub <- 2000
+
+# Lower wealth boundry
+# Bound should be low enough to minimize skew from sample values below lower limit
+# Skew will become a factor with longer horizons
+Wealth_lb <- 0
+
+# Discretize wealth vector (thousands $) 
+# Trade-off between granularity and computation time
+# Fine granularity produces better results on quadratic utility interval
+Wealth <- seq(Wealth_ub,Wealth_lb,-1)
+
+######################################################################
+# Client optimizations
+######################################################################
+
+# Client parameters
+Age.AA <- 52
+Age.BB <- 55
+Age.CC <- 57
+Age.DD <- 57
+Age.EE <- 62
+Age.FF <- 65
+
+Bal.AA <- 500
+Bal.BB <- 400
+Bal.CC <- 900
+Bal.DD <- 500
+Bal.EE <- 1100
+Bal.FF <- 950
+
+# Optimizations
+Age <- Age.FF
+Cont <- Contributions(Age)
+Bal <- Bal.FF
+(Client_Opt(Wealth,Age,Cont,Bal,V_mat))
