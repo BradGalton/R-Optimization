@@ -38,6 +38,35 @@ port.var = t(wts.init)%*%V%*%wts.init
 lambda.init = as.numeric(port.var/p)
 y.init = rbind(wts.init,lambda.init)
 
+Newton <- function(y.init) {
+  norm.diff <- .1
+  tol <- .0001
+  y.old <- y.init
+  while(norm.diff>tol) {
+    norm1 <- norm(y.old)
+    y.new <- y.old-Jinv(y.old,V)%*%F(y.old,V)    
+    norm2 <- norm(y.new)  
+    norm.diff <- abs(norm2-norm1)    
+    y.old <- y.new
+    }
+  return(y.new)
+}
+
+(wts.new <- Newton(y.init)[-6])
+(lambda.new <- Newton(y.init)[6])
+
+(lambda.new*p)
+(V.new <- t(wts.new)%*%V%*%wts.new)
+
+wts <- c(.4,.05,.25,.2,.1)                                        #Example weights
+mu.assets = apply(ret, 2, mean)
+mu.MCTRport = as.numeric(t(wts)%*%as.matrix(mu.assets,ncol=1))
+mu.RPport = as.numeric(t(wts.new)%*%as.matrix(mu.assets,ncol=1))
+port.MCTRsigma = sqrt(as.numeric(port.var))
+port.RPsigma = sqrt(as.numeric(V.new))
+sr.MCTRport = mu.MCTRport/port.MCTRsigma
+sr.RPport = mu.RPport/port.RPsigma
+
 # Compute MCTR
 port.sigma = sqrt(as.numeric(port.var))
 mctr = V%*%wts/port.sigma
