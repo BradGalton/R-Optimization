@@ -1,0 +1,40 @@
+# TO is the function to calculate the turnover at balance dates
+# Input: a zoo object containing the weights at balance dates
+# Output: a zoo object containing the turnover at the balance dates
+
+TO = function(weights){
+  dates = index(weights)
+  weights=coredata(weights)
+  n.asset=ncol(weights)
+  n.dates=nrow(weights)
+  if(n.dates<2){
+    print("Less than 2 balancing dates!")
+    return()
+  }
+  TurnOver=rep(0,n.dates-1)
+  for(i in 1:length(TurnOver)){
+    TurnOver[i]=sum(abs(weights[i+1,]-weights[i,]))
+  }
+  dates=dates[-1]
+  res=zoo(TurnOver,order.by = dates)
+  res
+}
+
+# DIV is the function to calculate the diversification
+# Input: a zoo object containing the weights at balance dates
+# Output: a zoo object containing the DIV values at the balance dates
+
+DIV = function(weights){
+  n.dates=nrow(weights)
+  if(n.dates<1){
+    print("empty data set")
+    return()
+  }
+  diversification=rep(0,n.dates)
+  for(i in 1:n.dates){
+    diversification[i]=1-sum(weights[i,]^2)
+  }
+  dates=index(weights)
+  Div=zoo(diversification,dates)
+  return(Div)
+}
