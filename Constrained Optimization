@@ -1,0 +1,139 @@
+rm(list=ls())
+library(PortfolioAnalytics)
+library(ROI)
+library(ROI.plugin.quadprog)
+library(ROI.plugin.glpk)
+library(foreach)
+load("filename")                    #Filename
+returns = largecap.ts[, 1:10]       #Dataframe example
+funds = colnames(returns)
+
+# Utility Function for Printing Optimal Portfolio Results
+opt.outputMeanVol = function(opt,returns,digits = NULL,names = NULL)
+{
+  wts = opt$weights
+  sigmasq = as.numeric(t(wts)%*%var(returns)%*%wts)
+  sigma = sqrt(sigmasq)
+  mu.ret = apply(returns,2,mean)
+  mu = as.numeric(t(wts)%*%mu.ret)
+  if(is.null(digits))
+  {names(sigma) = "sigma"
+   names(mu) = "mu"
+   output = c(wts,mu,sigma)} else
+   {if(is.null(names))
+   {output = list(wts=wts,mean=mu,vol=sigma)
+    output = lapply(output,round,digits)}
+   else
+   {output = list(wts,mu,sigma)
+    names(output) = names
+    output = lapply(output,round,digits)}
+   }
+  output
+}
+
+# Long-only Portfolio Specification Object
+pspec = portfolio.spec(assets=funds)
+pspec = add.constraint(pspec, type="full_investment")
+pspec.lo = add.constraint(pspec, type="long_only")
+pspec.lo = add.objective(pspec.lo, type="risk", name="var")
+
+# Optimize Portfolio
+opt = optimize.portfolio(returns, pspec.lo, optimize_method="quadprog")
+
+# Extract Results
+wts = opt$weights
+sigma = as.numeric(sqrt(opt$out))
+mu.ret = apply(returns,2,mean)
+mu = as.numeric(t(wts)%*%mu.ret)
+SR = mu/sigma
+gmv.lo = c(mu,sigma,SR)  # Save mu and sigma
+out = list(WTS = wts, MEAN = mu, STDEV = sigma)
+lapply(out,round,3)
+
+# Box Portfolio Specification Object
+pspec.box = add.constraint(pspec.lo, type="box", min=0.0, max=0.25,indexnum=2)
+
+# Optimize Portfolio
+opt = optimize.portfolio(returns, pspec.box, optimize_method="quadprog")
+
+# Extract Results
+wts = opt$weights
+sigma = as.numeric(sqrt(opt$out))
+mu.ret = apply(returns,2,mean)
+mu = as.numeric(t(wts)%*%mu.ret)
+SR = mu/sigma
+gmv.box = c(mu,sigma,SR) # Save for comparisons
+out = list(WTS = wts, MEAN = mu, STDEV = sigma)
+lapply(out,round,3)
+
+# Short-Box Portfolio Specification Object
+pspec.shbox = add.constraint(pspec.box, type="box", min=-0.1, max=0.35)
+pspec.shbox = add.objective(pspec.shbox, type="risk", name="var",indexnum=1)
+
+# Optimize Portfolio
+opt = optimize.portfolio(returns, pspec.shbox, optimize_method="quadprog")
+
+# Extract Output
+wts = opt$weights
+sigma = as.numeric(sqrt(opt$out))
+mu.ret = apply(returns,2,mean)
+mu = as.numeric(t(wts)%*%mu.ret)
+SR = mu/sigma
+gmv.shortbox = c(mu,sigma,SR) # Save for comparisons
+out = list(WTS = wts, MEAN = mu, STDEV = sigma)
+lapply(out,round,3)
+
+# Compare portfolio performances
+perf = data.frame(rbind(gmv.uc,gmv.lo,gmv.box,gmv.shortbox))
+names(perf) = c("MEAN","STDEV","SR")
+round(perf,3)
+
+# Short-Box Maximum Mean Portfolio Specification Object
+# Change Short-Box variance objective to a mean return objective.
+pspec.shbox.maxmean=add.constraint(pspec.lo,type="box",min=-.1,max=0.35,indexnum=2)
+pspec.shbox.maxmean = add.objective(pspec.shbox.maxmean, type="return", name="mean",indexnum=1)
+
+# Optimize Portfolio
+opt = optimize.portfolio(returns, pspec.shbox.maxmean, optimize_method="glpk")
+names = c("WTS.MAXMEAN.LO","MEAN.MAXMEAN.LO","VOL.MAXMEAN.LO")
+opt.outputMeanVol(opt,returns,digits = 3,names = names)
+
+# Modify Short-Box MaxMean to GMV w/ Target Return
+pspec.shbox.mu03=add.constraint(pspec.shbox.maxmean,type="return",return_target=.03017312)
+pspec.shbox.mu03=add.objective(pspec.shbox.mu03,type="risk",name="var",indexnum=1)
+
+# Optimize Portfolio
+opt = optimize.portfolio(returns, pspec.shbox.mu03, optimize_method="quadprog")
+opt.outputMeanVol(opt,returns,names = names)
+
+# Constrained QU Optimization
+# Risk Aversion Objective Function
+QU_opt <- function(y) {
+  pspec.qu=portfolio.spec(assets=funds)
+  pspec.qu=add.constraint(pspec.qu,type="full_investment")
+  pspec.qu=add.constraint(pspec.qu,type="box",min=-.1,max=.35)
+  pspec.qu=add.objective(pspec.qu,type="quadratic_utility",risk_aversion=y)
+  opt1 = optimize.portfolio(returns, pspec.qu, optimize_method="ROI")
+  return(opt.outputMeanVol(opt1,returns,names=names)[11])
+}
+
+RA_obj <- function(y) {
+    QU_opt(y)-opt.outputMeanVol(opt,returns)[11]
+}
+
+RA <- uniroot(function(y) RA_obj(y),c(10,.1),tol=1e-9)$root
+
+# Optimize Portfolio
+opt1 = optimize.portfolio(returns, pspec.qu, optimize_method="ROI")
+opt.outputMeanVol(opt1,returns,names = names)
+
+# Efficient Frontier Overlay
+efront.lo=create.EfficientFrontier(returns,pspec.lo,type="mean-StdDev")
+efront.box=create.EfficientFrontier(returns,pspec.box,type="mean-StdDev")
+efront.shbox=create.EfficientFrontier(returns,pspec.shbox,type="mean-StdDev")
+pspec.list=combine.portfolios(list(pspec.lo,pspec.box,pspec.shbox))
+chart.EfficientFrontierOverlay(returns,pspec.list,type="mean-StdDev",match.col="StdDev",xlim=c(0.025,.20),ylim=c(0,.05),legend.loc="topleft",legend.labels=c("Long-only","Box","Short Box"),cex.legend=0.8,labels.assets=T,lty=c(1,2,5),lwd=c(1.3,1.7,1.7))
+chart.Weights.EF(efront.box,match.col="StdDev",main="Box Weights",cex.legend=0.5,colorset=topo.colors(10))
+chart.Weights.EF(efront.shbox,match.col="StdDev",main="Short-Box Weights",cex.legend=0.5,colorset=topo.colors(10))
+
+chart.EfficientFrontier(efront.lo,match.col="StdDev")
