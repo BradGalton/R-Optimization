@@ -1,0 +1,104 @@
+library(PortfolioAnalytics)
+data(edhec)
+R <- edhec[,1:4]
+funds <- colnames(R)
+
+dim(R)
+periodicity(R)
+
+# Set up portfolio
+portf <- portfolio.spec(funds)
+portf <- add.constraint(portf, "full_investment")
+portf <- add.constraint(portf, "long_only")
+portf <- add.objective(portf, type="risk", name="StdDev")
+
+bt.opt1 <- optimize.portfolio.rebalancing(R, portf, optimize_method="ROI",
+                                          rebalance_on="months",
+                                          training_period=148,
+                                          trailing_periods=NULL)
+
+# Number of rebalances
+length(bt.opt1$opt_rebalancing)
+
+# View the first and last observation of data used for the first rebalancing
+bt.opt1$opt_rebalancing[[1]]$data_summary$first
+R[1]
+
+bt.opt1$opt_rebalancing[[1]]$data_summary$last
+R[148]
+
+# View the first and last observation of data used for the 2nd rebalancing
+bt.opt1$opt_rebalancing[[2]]$data_summary$first
+R[1]
+
+bt.opt1$opt_rebalancing[[2]]$data_summary$last
+R[149]
+
+# Trailing_periods=36 so that the previous 36 periods (monthly
+# data 36 periods = 3 years) are used in the optimization.
+bt.opt2 <- optimize.portfolio.rebalancing(R, portf, optimize_method="ROI",
+                                          rebalance_on="months",
+                                          training_period=148,
+                                          trailing_periods=36)
+
+# View the first and last observation of data used for the first rebalancing
+bt.opt2$opt_rebalancing[[1]]$data_summary$first
+R[148-36]
+
+bt.opt2$opt_rebalancing[[1]]$data_summary$last
+R[148]
+
+# View the first and last observation of data used for the 2nd rebalancing
+bt.opt2$opt_rebalancing[[2]]$data_summary$first
+R[149-36]
+
+bt.opt2$opt_rebalancing[[2]]$data_summary$last
+R[149]
+
+# Print out the information for the data used at each rebalancing date
+R.index <- index(R)
+for(i in 1:length(bt.opt2$opt_rebalancing)){
+  cat("Rebalancing Number: ", i, "\n", sep="")
+  idx.first <- which(R.index == index(bt.opt2$opt_rebalancing[[i]]$data_summary$first))
+  idx.last <- which(R.index == index(bt.opt2$opt_rebalancing[[i]]$data_summary$last))
+  print(paste("start date of data: ", R.index[idx.first], "index: ", idx.first))
+  print(paste("  end date of data: ", R.index[idx.last],  "index: ", idx.last))
+  cat("*****\n\n")
+}
+
+plot_rebal_dates <- function(object, R, n){
+  R.index <- index(R)
+  rebal_start_idx <- unlist(lapply(object$opt_rebalancing, function(x){
+    which(R.index == index(x$data_summary$first))}
+  ))
+  
+  rebal_end_idx <- unlist(lapply(object$opt_rebalancing, function(x){
+    which(R.index == index(x$data_summary$last))}
+  ))
+  
+  nobs <- length(rebal_end_idx)
+  if(n > nobs){
+    n <- nobs
+    message("n greater than the number of observations")
+  }
+  
+  tmp <- xts(rep(1, length(R.index)), R.index)
+  plot.xts(tmp, type="n", ylim=c(0,1), main=paste("Rebalance Periods\nperiod:", n))
+  abline(v=.index(R)[rebal_start_idx[n]])
+  text(.index(R)[rebal_start_idx[n]], y=1, labels=R.index[rebal_start_idx[n]],
+       pos=4, srt=-90, cex=0.8)
+  abline(v=.index(R)[rebal_end_idx[n]])
+  text(.index(R)[rebal_end_idx[n]], y=1, labels=R.index[rebal_end_idx[n]],
+       pos=4, srt=-90, cex=0.8)
+}
+
+plot_rebal_dates(bt.opt2, R, 1)
+plot_rebal_dates(bt.opt2, R, 10)
+plot_rebal_dates(bt.opt2, R, 11)
+plot_rebal_dates(bt.opt2, R, 1000)
+
+# Animation to show how the window moves
+for(i in 1:length(bt.opt2$opt_rebalancing)){
+  plot_rebal_dates(bt.opt2, R, i)
+  Sys.sleep(0.5)
+}
